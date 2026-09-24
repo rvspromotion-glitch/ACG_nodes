@@ -48,6 +48,21 @@ def parse_script(text):
     return s
 
 
+def unique_name(name, root):
+    """black lace -> black lace b -> black lace c ... (letters, a trailing number would read as a step)"""
+    import folder_paths, string
+    base = os.path.join(folder_paths.get_output_directory(), root)
+    cand, i = name, 1
+    while os.path.exists(os.path.join(base, cand)):
+        i += 1
+        n, suf = i - 1, ""
+        while n:
+            n, r = divmod(n - 1, 26) if suf else divmod(n, 26)
+            suf = string.ascii_lowercase[r] + suf
+        cand = f"{name} {suf}"
+    return cand
+
+
 class ACGScriptParse:
     """Gemini script JSON -> lists (prompt, seed, folder, media name, caption). Downstream runs once per item."""
     @classmethod
@@ -58,7 +73,14 @@ class ACGScriptParse:
             "base_seed": ("INT", {"default": 873447843474139, "min": 0, "max": 0xffffffffffffffff}),
             "only_levels": ("STRING", {"default": "", "tooltip": "e.g. 1,3 . empty = all"}),
             "only_image": ("INT", {"default": 0, "min": 0, "max": 12, "tooltip": "0 = all, 2 = only image 2 of each bundle"}),
+            "root": ("STRING", {"default": "acg_sets", "tooltip": "same as ACG Vault Save root"}),
+            "if_exists": (["new name", "overwrite"],),
+            "set_name_override": ("STRING", {"default": "", "tooltip": "empty = use Gemini's set_name"}),
         }}
+
+    @classmethod
+    def IS_CHANGED(cls, **kw):
+        return float("nan")  # always re-run so each queue gets a fresh, unused set name
 
     RETURN_TYPES = ("STRING", "INT", "STRING", "STRING", "STRING", "STRING")
     RETURN_NAMES = ("prompt", "seed", "folder", "media_name", "caption", "report")
@@ -66,11 +88,14 @@ class ACGScriptParse:
     FUNCTION = "run"
     CATEGORY = "ACG/script"
 
-    def run(self, script_text, prefix, base_seed, only_levels, only_image):
+    def run(self, script_text, prefix, base_seed, only_levels, only_image,
+            root="acg_sets", if_exists="new name", set_name_override=""):
         s = parse_script(script_text)
         levels = {int(x) for x in only_levels.split(",") if x.strip()} or None
         tail = " ".join(s["shoot"][k].strip() for k in ("environment", "lighting", "camera"))
-        name = s.get("set_name", "untitled").strip().lower()
+        name = (set_name_override or s.get("set_name", "untitled")).strip().lower()
+        if if_exists == "new name":
+            name = unique_name(name, root)
         out = [[] for _ in range(5)]
         report = [f"set: {name}"]
         for b in s["bundles"]:
